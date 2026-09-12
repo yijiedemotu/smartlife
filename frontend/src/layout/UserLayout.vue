@@ -1,15 +1,15 @@
 <template>
   <el-container class="user-layout">
     <el-header class="header">
-      <div class="logo" @click="$router.push('/home')">🍜 智联生活</div>
+      <div class="logo" @click="$router.push('/user/home')">🍜 智联生活</div>
       <div class="nav">
-        <router-link to="/home">首页</router-link>
-        <router-link to="/seckill">限时秒杀</router-link>
-        <router-link to="/mate">找饭搭子</router-link>
-        <router-link to="/chat">消息<el-badge v-if="msgUnread" :value="msgUnread" class="cart-badge" /></router-link>
-        <router-link to="/cart">购物车<el-badge v-if="cartCount" :value="cartCount" class="cart-badge" /></router-link>
-        <router-link to="/orders">我的订单</router-link>
-        <router-link to="/vouchers">我的券包</router-link>
+        <router-link to="/user/home">首页</router-link>
+        <router-link to="/user/seckill">限时秒杀</router-link>
+        <router-link to="/user/mate">找饭搭子</router-link>
+        <router-link to="/user/chat">消息<el-badge v-if="msgUnread" :value="msgUnread" class="cart-badge" /></router-link>
+        <router-link to="/user/cart">购物车<el-badge v-if="cartCount" :value="cartCount" class="cart-badge" /></router-link>
+        <router-link to="/user/orders">我的订单</router-link>
+        <router-link to="/user/vouchers">我的券包</router-link>
       </div>
       <el-dropdown @command="onCommand">
         <span class="user-name">
@@ -69,7 +69,7 @@ async function loadMsgUnread() {
 }
 
 function onCommand(cmd) {
-  if (cmd === 'profile') router.push('/profile')
+  if (cmd === 'profile') router.push('/user/profile')
   if (cmd === 'merchant' || cmd === 'merchant-admin') router.push('/merchant/dashboard')
   if (cmd === 'admin') router.push('/admin/dashboard')
   if (cmd === 'logout') {

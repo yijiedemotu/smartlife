@@ -109,7 +109,7 @@ async function detail(id) {
 /** 跳转到私信会话（新搭子也可直接发起） */
 function chatTo(id) {
   dialogVisible.value = false
-  router.push({ path: '/chat', query: { to: id } })
+  router.push({ path: '/user/chat', query: { to: id } })
 }
 
 async function loadHot() {

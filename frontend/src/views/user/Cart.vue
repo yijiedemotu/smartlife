@@ -2,7 +2,7 @@
   <div>
     <div class="page-card" v-if="!groups.length">
       <el-empty description="购物车是空的，快去挑点好吃的吧">
-        <el-button type="warning" @click="$router.push('/home')">去逛逛</el-button>
+        <el-button type="warning" @click="$router.push('/user/home')">去逛逛</el-button>
       </el-empty>
     </div>
 

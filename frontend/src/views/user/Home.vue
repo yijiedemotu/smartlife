@@ -9,7 +9,7 @@
       <el-button :type="mode === 'nearby' ? 'warning' : 'default'" @click="toggleNearby">
         <el-icon><Location /></el-icon>&nbsp;{{ mode === 'nearby' ? '附近店铺' : '开启附近' }}
       </el-button>
-      <el-button type="danger" plain @click="$router.push('/seckill')">🔥 限时秒杀</el-button>
+      <el-button type="danger" plain @click="$router.push('/user/seckill')">🔥 限时秒杀</el-button>
     </div>
 
     <!-- 分类 -->
@@ -24,7 +24,7 @@
     <div v-if="loading" class="page-card center">加载中...</div>
     <el-empty v-else-if="!shops.length" description="暂无店铺" />
     <div v-else class="shop-grid">
-      <el-card v-for="s in shops" :key="s.id" class="shop-card" shadow="hover" @click="$router.push('/shop/' + s.id)">
+      <el-card v-for="s in shops" :key="s.id" class="shop-card" shadow="hover" @click="$router.push('/user/shop/' + s.id)">
         <img :src="s.images || ''" class="shop-img" alt="" @error="onImgError" />
         <div class="shop-body">
           <div class="shop-name">{{ s.name }}

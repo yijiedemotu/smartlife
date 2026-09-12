@@ -8,9 +8,9 @@
       <div v-if="!list.length" class="center">暂无可抢的秒杀活动</div>
       <div class="seckill-grid">
         <el-card v-for="v in list" :key="v.id" class="seckill-card" shadow="hover">
-          <img :src="v.shopImage || ''" class="seckill-img" @error="onImgError" @click="$router.push('/shop/' + v.shopId)" />
+          <img :src="v.shopImage || ''" class="seckill-img" @error="onImgError" @click="$router.push('/user/shop/' + v.shopId)" />
           <div class="body">
-            <div class="title" @click="$router.push('/shop/' + v.shopId)">{{ v.title }}</div>
+            <div class="title" @click="$router.push('/user/shop/' + v.shopId)">{{ v.title }}</div>
             <div class="shop-line">{{ v.shopName }} · {{ v.shopArea }}</div>
             <div class="sub">{{ v.subTitle }}</div>
             <div class="price-line">

@@ -2,7 +2,7 @@
   <div class="page-card">
     <h3>🎫 我的券包 <span class="sub">秒杀成功的券也会实时出现在这里</span></h3>
     <el-empty v-if="!vouchers.length" description="还没有优惠券，去秒杀页或店铺看看吧">
-      <el-button type="danger" round @click="$router.push('/seckill')">去秒杀</el-button>
+      <el-button type="danger" round @click="$router.push('/user/seckill')">去秒杀</el-button>
     </el-empty>
     <div v-else class="voucher-list">
       <div v-for="v in vouchers" :key="v.id" class="voucher" :class="{ used: v.status === 2 }">

@@ -111,7 +111,7 @@ async function grab(v) {
 }
 
 function goSeckill() {
-  router.push({ path: '/seckill', query: { shopId } })
+  router.push({ path: '/user/seckill', query: { shopId } })
 }
 
 onMounted(() => {
