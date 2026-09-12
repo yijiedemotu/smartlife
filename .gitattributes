@@ -1,0 +1,45 @@
+# =============================================================================
+# 换行符规范（重要：直接决定 Linux 服务器上部署脚本能否执行）
+#
+# 背景：Windows 下 core.autocrlf=true 会把工作区文件转成 CRLF。如果 CRLF 被提交进仓库，
+# 服务器 clone 出来的 shell 脚本会因 shebang 末尾带回车而报：
+#     bash: ./scripts/deploy.sh: /bin/bash^M: bad interpreter: No such file or directory
+# 因此这里强制"这些文件在仓库里永远存 LF"（text eol=lf 表示检出时也用 LF）。
+# =============================================================================
+
+# 默认：自动识别文本文件，仓库内统一 LF
+* text=auto eol=lf
+
+# 部署与脚本：必须是 LF
+*.sh            text eol=lf
+*.bash          text eol=lf
+Dockerfile      text eol=lf
+*.dockerfile    text eol=lf
+.dockerignore   text eol=lf
+.gitattributes  text eol=lf
+.gitignore      text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.conf          text eol=lf
+*.properties    text eol=lf
+*.xml           text eol=lf
+*.env           text eol=lf
+*.example       text eol=lf
+*.sql           text eol=lf
+
+# 文档与前端源码：LF 更友好（也避免 diff 噪音）
+*.md            text eol=lf
+*.js            text eol=lf
+*.vue           text eol=lf
+*.json          text eol=lf
+
+# 二进制文件：不要做任何换行转换
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.ico           binary
+*.jar           binary
+*.gz            binary
+*.zip           binary
+*.rdb           binary
