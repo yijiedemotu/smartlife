@@ -1,0 +1,211 @@
+# =============================================================================
+# 智联生活 · 生产环境编排（阿里云 Ubuntu 22.04 单机部署）
+#
+# 启动：docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+# 停止：docker compose --env-file .env.prod -f docker-compose.prod.yml down
+# 日志：docker compose --env-file .env.prod -f docker-compose.prod.yml logs -f backend
+#
+# 组成：MySQL8 + Redis7 + RabbitMQ3.12 + Spring Boot 后端 + Nginx 前端
+# 对外端口：仅 80（网站）用于公网；3306/6379/5672/15672/8080 默认只绑 127.0.0.1 供本机运维
+# =============================================================================
+
+name: smartlife
+
+services:
+  # ---------------------------------------------------------------------------
+  # MySQL 8：业务数据库，首次启动自动执行 sql/init.sql 建表 + 种子数据
+  # ---------------------------------------------------------------------------
+  mysql:
+    image: mysql:8.0
+    container_name: smartlife-mysql
+    restart: always
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+      - --max_connections=500
+      - --innodb-buffer-pool-size=512M
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env.prod 中设置 MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-smartlife}
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 首次初始化（数据卷为空时）自动执行，按文件名顺序执行
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./backup:/backup
+    ports:
+      # 仅本机可连，用于运维/迁移；如需远程连接自行改成 0.0.0.0 并在安全组放行
+      - "127.0.0.1:3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    networks:
+      - smartlife-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # ---------------------------------------------------------------------------
+  # Redis 7：多级缓存 / GEO 附近 / 秒杀 Lua / BitMap 签到 / HyperLogLog UV
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: smartlife-redis
+    restart: always
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - ${REDIS_PASSWORD:?请在 .env.prod 中设置 REDIS_PASSWORD}
+      - --maxmemory
+      - 512mb
+      - --maxmemory-policy
+      - noeviction
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - redis-data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - smartlife-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # RabbitMQ：秒杀异步下单削峰 + 死信队列兜底
+  # ---------------------------------------------------------------------------
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: smartlife-rabbitmq
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBIT_USER:?请在 .env.prod 中设置 RABBIT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBIT_PASSWORD:?请在 .env.prod 中设置 RABBIT_PASSWORD}
+      TZ: Asia/Shanghai
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - smartlife-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # 后端：Spring Boot 2.7（容器内 Maven 构建，服务器无需装 JDK）
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: smartlife-backend:${APP_VERSION:-2.0.0}
+    container_name: smartlife-backend
+    restart: always
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Shanghai
+      # 数据源与中间件（服务名即容器 DNS 名）
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      RABBIT_HOST: rabbitmq
+      RABBIT_PORT: "5672"
+      RABBIT_USER: ${RABBIT_USER}
+      RABBIT_PASSWORD: ${RABBIT_PASSWORD}
+      # 生产建议：使用自定义 JWT 密钥（>=32 字节）与关闭 SQL 日志
+      SMARTLIFE_JWT_SECRET: ${JWT_SECRET:?请在 .env.prod 中设置 JWT_SECRET}
+      SPRING_PROFILES_ACTIVE: prod
+      # 秒杀方案开关：true=Redis Lua 原子预扣，false=Redisson 分布式锁（可对比压测）
+      SMARTLIFE_SECKILL_LUA: ${SECKILL_LUA_ENABLED:-true}
+      JAVA_OPTS: ${BACKEND_JAVA_OPTS:--Xms512m -Xmx1024m -XX:+UseG1GC -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai}
+    volumes:
+      - backend-logs:/app/logs
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      # 仅本机可访问（调试/接口文档用）；公网统一走 Nginx 的 80 端口
+      - "127.0.0.1:8080:8080"
+    networks:
+      - smartlife-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # ---------------------------------------------------------------------------
+  # 前端：Nginx 静态站点 + /api 反向代理 + WebSocket 升级
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: smartlife-frontend:${APP_VERSION:-2.0.0}
+    container_name: smartlife-frontend
+    restart: always
+    depends_on:
+      - backend
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      # 唯一对外端口：无域名场景直接通过 http://公网IP/ 访问
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - smartlife-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  mysql-data:
+    name: smartlife-mysql-data
+  redis-data:
+    name: smartlife-redis-data
+  rabbitmq-data:
+    name: smartlife-rabbitmq-data
+  backend-logs:
+    name: smartlife-backend-logs
+
+networks:
+  smartlife-net:
+    name: smartlife-net
+    driver: bridge

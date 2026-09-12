@@ -1,0 +1,23 @@
+# =============================================================================
+# 生产环境覆盖配置（由 SPRING_PROFILES_ACTIVE=prod 激活）
+# 用法：docker compose 已设置该变量，无需手动指定
+# =============================================================================
+
+spring:
+  # 生产环境不打印 SQL，避免日志暴涨与性能损耗
+  jackson:
+    default-property-inclusion: non_null
+
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+
+# 生产环境建议关闭接口文档公网暴露（如需临时开启，设 KNIFE4J_ENABLE=true）
+knife4j:
+  enable: ${KNIFE4J_ENABLE:false}
+  production: true
+
+logging:
+  level:
+    root: warn
+    com.smartlife: info

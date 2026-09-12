@@ -1,0 +1,31 @@
+# Java / Maven
+backend/target/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# Node
+node_modules/
+frontend/dist/
+*.local
+
+# 日志与临时
+*.log
+logs/
+tmp/
+.DS_Store
+dump.rdb
+
+# 本地/生产配置（含真实密码，严禁提交）
+application-local.yml
+.env
+.env.prod
+
+# 数据库备份
+backup/

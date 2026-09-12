@@ -1,0 +1,17 @@
+# =============================================================================
+# 本地开发环境覆盖配置（SPRING_PROFILES_ACTIVE=dev）
+# 保留 SQL 日志与接口文档，便于调试
+# =============================================================================
+
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+knife4j:
+  enable: true
+  production: false
+
+logging:
+  level:
+    root: info
+    com.smartlife: debug

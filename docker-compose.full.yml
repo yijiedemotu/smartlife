@@ -1,0 +1,97 @@
+# =============================================================================
+# 全栈一键编排（本地/演示用，端口直连、无 TLS、密钥为演示默认值）
+# 用法：docker compose -f docker-compose.full.yml up -d --build
+#   前端 http://localhost:5173    后端 http://localhost:8080/api/doc.html
+#
+# 服务器正式部署请改用 docker-compose.prod.yml（含健康检查/密钥注入/仅暴露 80）
+# =============================================================================
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: smartlife-mysql-full
+    environment:
+      MYSQL_ROOT_PASSWORD: 123456
+      MYSQL_DATABASE: smartlife
+      TZ: Asia/Shanghai
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p123456"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: smartlife-redis-full
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: smartlife-rabbitmq-full
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+      TZ: Asia/Shanghai
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  backend:
+    build: ./backend
+    image: smartlife-backend:2.0.0
+    container_name: smartlife-backend-full
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_HOST: mysql
+      MYSQL_USER: root
+      MYSQL_PASSWORD: 123456
+      REDIS_HOST: redis
+      RABBIT_HOST: rabbitmq
+      RABBIT_USER: guest
+      RABBIT_PASSWORD: guest
+      SPRING_PROFILES_ACTIVE: prod
+      SMARTLIFE_JWT_SECRET: smartlife-full-demo-secret-key-please-change-0123456789
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build: ./frontend
+    image: smartlife-frontend:2.0.0
+    container_name: smartlife-frontend-full
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+
+volumes:
+  mysql-data:
+  redis-data:
+  rabbitmq-data:
