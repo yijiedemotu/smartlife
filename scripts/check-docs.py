@@ -126,6 +126,48 @@ def main():
         check(f"{rel} 为 LF 且无 BOM", not has_crlf and not has_bom,
               f"CRLF={has_crlf} BOM={has_bom}")
 
+    print("\n=== 4c. deploy.sh 的 .env.prod 占位符校验必须忽略注释行 ===")
+    # 这条规则来自一次真实故障：模板顶部说明文字里含 "CHANGE_ME"，
+    # 早期脚本用 `grep -q "CHANGE_ME"` 导致合法配置被误判为"未替换密码"而拒绝部署。
+    import re as _re
+    import subprocess
+    import tempfile
+
+    deploy_path = os.path.join(ROOT, "scripts", "deploy.sh")
+    with open(deploy_path, "r", encoding="utf-8") as fh:
+        deploy_text = fh.read()
+
+    m = _re.search(r"PLACEHOLDER_RE='([^']+)'", deploy_text)
+    check("deploy.sh 中定义了 PLACEHOLDER_RE 常量", bool(m), "未找到 PLACEHOLDER_RE")
+    if m:
+        pattern = m.group(1)
+        compiled = _re.compile(pattern)
+
+        def rejected(text):
+            """模拟 shell 里 grep -qE 的语义：任意一行命中即视为未替换"""
+            return any(compiled.search(line) for line in text.splitlines())
+
+        good = (
+            "#   vim .env.prod            # 修改下面所有 CHANGE_ME 的值为强密码/随机串\n"
+            "# CHANGE_ME 只是占位提示，注释行不该触发校验\n"
+            "APP_VERSION=2.0.0\n"
+            "MYSQL_ROOT_PASSWORD=aB3/xY9+Qm2Zr8Lp1Ks4Vt7W\n"
+            "REDIS_PASSWORD=Zx9Qw8Ee7Rt6Yu5Io4Pa3Sd2F\n"
+            "RABBIT_USER=smartlife\n"
+            "RABBIT_PASSWORD=Mn7Bv6Cx5Za4Ls3Df2Gh1Jk0\n"
+            "JWT_SECRET=aVeryLongRandomJwtSecretValue0123456789abcdef\n"
+        )
+        bad = "MYSQL_ROOT_PASSWORD=CHANGE_ME_mysql_root_strong_password\n"
+
+        check("含 CHANGE_ME 注释 + 真实密码的 .env.prod 应通过校验", not rejected(good),
+              "被误判为占位符")
+        check("真正未替换的赋值行应被拦截", rejected(bad), "漏判")
+
+        # 额外确认：脚本里不再残留裸 grep "CHANGE_ME"（那正是误判来源）
+        bare = _re.search(r'grep[^\n]*"CHANGE_ME"', deploy_text)
+        check("deploy.sh 不再使用裸 grep \"CHANGE_ME\"", bare is None,
+              bare.group(0) if bare else "")
+
     print("\n=== 5. 演示账号口径一致（四个账号都应被文档提到）===")
     for acc in ("13800000000", "13700000001", "13700000002", "13900000001"):
         check(f"演示账号 {acc} 在文档中", acc in joined)

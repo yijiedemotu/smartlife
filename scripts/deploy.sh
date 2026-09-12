@@ -52,9 +52,20 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   err "未找到 ${ENV_FILE}，请先执行：cp .env.prod.example .env.prod && vim .env.prod"
   exit 1
 fi
-if grep -q "CHANGE_ME" "${ENV_FILE}"; then
-  err "${ENV_FILE} 中仍有 CHANGE_ME 占位密码，请先修改为强密码"
-  grep -n "CHANGE_ME" "${ENV_FILE}" || true
+# 占位符校验：只看"未被注释的赋值行"（^变量名=...CHANGE_ME），
+# 否则模板顶部说明文字里的 "CHANGE_ME" 会被误判成未替换的密码（真实踩过的坑）。
+# 注意：这里刻意不用 POSIX 字符类 [[:space:]]，因为 Python 的 re 模块不支持该写法
+# （会被解析成嵌套字符集而静默失配），scripts/check-docs.py 会用同一条正则做回归测试。
+PLACEHOLDER_RE='^[ \t]*[A-Za-z_][A-Za-z0-9_]*=.*CHANGE_ME'
+if grep -qE "${PLACEHOLDER_RE}" "${ENV_FILE}"; then
+  err "${ENV_FILE} 中仍有未替换的 CHANGE_ME 占位密码，请先改成强密码"
+  grep -nE "${PLACEHOLDER_RE}" "${ENV_FILE}" || true
+  echo "  修复命令（复制整段执行，幂等）："
+  echo "    sed -i \"s|^MYSQL_ROOT_PASSWORD=.*|MYSQL_ROOT_PASSWORD=\$(openssl rand -base64 24)|\" ${ENV_FILE}"
+  echo "    sed -i \"s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=\$(openssl rand -base64 24)|\" ${ENV_FILE}"
+  echo "    sed -i \"s|^RABBIT_PASSWORD=.*|RABBIT_PASSWORD=\$(openssl rand -base64 24)|\" ${ENV_FILE}"
+  echo "    sed -i \"s|^JWT_SECRET=.*|JWT_SECRET=\$(openssl rand -base64 36)|\" ${ENV_FILE}"
+  echo "  改完再执行本脚本即可。详见 docs/重新部署验证清单.md 阶段 3。"
   exit 1
 fi
 
