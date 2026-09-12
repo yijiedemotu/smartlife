@@ -30,11 +30,14 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # 站点配置：history 路由回退 + /api 反向代理 + WebSocket 升级
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+# 80 与 443 共用的站点配置片段（启用 HTTPS 后 443 也要 include 这一份）
+COPY site.inc /etc/nginx/snippets/site.inc
 COPY --from=build /app/dist /usr/share/nginx/html
 
-EXPOSE 80
+EXPOSE 80 443
 
+# 探活打 /index.html：精确匹配 location，启用 HTTPS 后不会被 301 跳走
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD wget -q -O /dev/null http://127.0.0.1/ || exit 1
+    CMD wget -q -O /dev/null http://127.0.0.1/index.html || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]

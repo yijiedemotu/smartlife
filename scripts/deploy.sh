@@ -8,6 +8,9 @@
 #   ./scripts/deploy.sh --logs       # 查看后端日志
 #   ./scripts/deploy.sh --status     # 查看容器状态
 #   ./scripts/deploy.sh --down       # 停止全部服务（保留数据卷）
+#
+# 构建后会先用新镜像跑一次 `nginx -t` 预检：配置写错就中止发布，线上老容器不受影响。
+# 需要 HTTPS 时另执行：./scripts/https-enable.sh（无域名也能签 Let's Encrypt IP 证书）
 # =============================================================================
 set -euo pipefail
 
@@ -88,9 +91,27 @@ else
   ${COMPOSE} build
 fi
 
+# ---------------------------------------------------------------- 配置预检
+# 用刚构建出来的镜像做一次 Nginx 语法校验：配置写错就在这里拦住，
+# 线上老容器继续跑，不会因为一次错误发版导致前端起不来（那是整站不可用）。
+# 说明：
+#   --add-host backend:127.0.0.1  独立 run 时容器里解析不到 compose 服务名，指到本机绕过；
+#   certs / nginx-extra 只读挂载    保证「已经启用 HTTPS」的场景也一起校验。
+log "预检前端 Nginx 配置 ..."
+APP_VERSION_VALUE="$(grep -E '^APP_VERSION=' "${ENV_FILE}" | cut -d= -f2 | tr -d ' ')"
+FRONTEND_IMAGE="smartlife-frontend:${APP_VERSION_VALUE:-2.0.0}"
+mkdir -p certs nginx-extra acme-webroot
+if ! docker run --rm --add-host backend:127.0.0.1 \
+      -v "${PROJECT_DIR}/certs:/etc/nginx/certs:ro" \
+      -v "${PROJECT_DIR}/nginx-extra:/etc/nginx/conf.d-extra:ro" \
+      --entrypoint nginx "${FRONTEND_IMAGE}" -t; then
+  err "前端 Nginx 配置校验失败，已中止发布（线上容器未受影响，仍是改动前的版本）"
+  exit 1
+fi
+log "Nginx 配置校验通过 ✅"
+
 log "启动服务 ..."
 ${COMPOSE} up -d --remove-orphans
-
 # ---------------------------------------------------------------- 健康检查
 log "等待服务就绪（最多 180 秒）..."
 HTTP_PORT_VALUE="$(grep -E '^HTTP_PORT=' "${ENV_FILE}" | cut -d= -f2 | tr -d ' ')"
@@ -125,12 +146,20 @@ done
 echo
 log "部署完成 🎉"
 PUBLIC_IP="$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || echo '服务器公网IP')"
-echo "  用户端：http://${PUBLIC_IP}/user/home"
-echo "  商家端：http://${PUBLIC_IP}/merchant/dashboard"
-echo "  管理端：http://${PUBLIC_IP}/admin/dashboard"
+if [[ -f "${PROJECT_DIR}/nginx-extra/http/https.conf" ]]; then
+  SCHEME="https"
+  echo "  已启用 HTTPS（证书由 acme.sh 自动续签，纯 HTTP 访问会 301 跳转过来）"
+else
+  SCHEME="http"
+  echo "  当前为纯 HTTP，需要 HTTPS 就执行：./scripts/https-enable.sh"
+fi
+echo "  用户端：${SCHEME}://${PUBLIC_IP}/user/home"
+echo "  商家端：${SCHEME}://${PUBLIC_IP}/merchant/dashboard"
+echo "  管理端：${SCHEME}://${PUBLIC_IP}/admin/dashboard"
 echo "  演示账号：管理员 13800000000/admin123 ｜ 商家 13700000001/merchant123 ｜ 用户 13900000001/123456"
 echo
 echo "常用命令："
 echo "  查看状态：./scripts/deploy.sh --status"
 echo "  查看日志：./scripts/deploy.sh --logs"
 echo "  备份数据：./scripts/backup-db.sh"
+echo "  启用 HTTPS：./scripts/https-enable.sh（带 --status 查看证书有效期）"

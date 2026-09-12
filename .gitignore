@@ -30,6 +30,12 @@ application-local.yml
 # 数据库备份
 backup/
 
+# HTTPS：证书私钥、LE 校验文件、动态生成的 Nginx 附加配置
+# 由 scripts/https-enable.sh 在服务器上生成，绝不能提交（含私钥）
+certs/
+acme-webroot/
+nginx-extra/
+
 # Python 缓存
 __pycache__/
 *.pyc

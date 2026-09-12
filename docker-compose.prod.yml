@@ -183,10 +183,22 @@ services:
     environment:
       TZ: Asia/Shanghai
     ports:
-      # 唯一对外端口：无域名场景直接通过 http://公网IP/ 访问
+      # HTTP 对外端口：正常访问 + Let's Encrypt http-01 域名/IP 校验都走它。
+      # 启用 HTTPS 后页面请求会 301 跳到 443（校验路径 /\.well-known/ 不跳）。
       - "${HTTP_PORT:-80}:80"
+      # HTTPS 对外端口：证书由 scripts/https-enable.sh 签发后就绪，
+      # 未启用 HTTPS 时该端口虽然映射着但没有 443 监听，不影响现有访问。
+      - "${HTTPS_PORT:-443}:443"
     volumes:
       - /etc/localtime:/etc/localtime:ro
+      # 下面三个目录由 scripts/https-enable.sh 维护（宿主持久化，续签只覆盖文件 +
+      # nginx -s reload，不需要重建镜像）：
+      #   certs/        证书（fullchain.pem / privkey.pem）
+      #   nginx-extra/  443 站点配置 + 80→443 跳转片段（空目录=纯 HTTP 模式）
+      #   acme-webroot/ Let's Encrypt http-01 校验文件目录
+      - ./certs:/etc/nginx/certs:ro
+      - ./nginx-extra:/etc/nginx/conf.d-extra:ro
+      - ./acme-webroot:/var/www/acme:ro
     networks:
       - smartlife-net
     logging:

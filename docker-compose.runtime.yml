@@ -178,9 +178,16 @@ services:
     environment:
       TZ: Asia/Shanghai
     ports:
+      # HTTP 对外端口：正常访问 + Let's Encrypt http-01 校验都走它（启用 HTTPS 后 301 跳 443）
       - "${HTTP_PORT:-80}:80"
+      # HTTPS 对外端口：由 scripts/https-enable.sh 签发证书后生效
+      - "${HTTPS_PORT:-443}:443"
     volumes:
       - /etc/localtime:/etc/localtime:ro
+      # 证书 / 443 站点配置 / ACME 校验目录，均由 scripts/https-enable.sh 维护
+      - ./certs:/etc/nginx/certs:ro
+      - ./nginx-extra:/etc/nginx/conf.d-extra:ro
+      - ./acme-webroot:/var/www/acme:ro
     networks:
       - smartlife-net
     logging:

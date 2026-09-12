@@ -231,7 +231,7 @@ mysql -uroot -p smartlife < sql/manual/upgrade_v2_three_end.sql
 
 ## 九、服务器部署（阿里云 Ubuntu 22.04，无域名）
 
-**整机全容器化，一条命令拉起全站**（MySQL + Redis + RabbitMQ + 后端 + Nginx 前端），仅对外暴露 80 端口：
+**整机全容器化，一条命令拉起全站**（MySQL + Redis + RabbitMQ + 后端 + Nginx 前端），对外只暴露 80（HTTP）与 443（HTTPS）：
 
 ```bash
 # 服务器上执行（详见 docs/01-从零部署-上.md 与 02-从零部署-下.md）
@@ -240,13 +240,20 @@ cp .env.prod.example .env.prod && vim .env.prod    # 改密码/密钥
 chmod +x scripts/*.sh
 ./scripts/deploy.sh --first
 # 访问 http://<服务器公网IP>/
+
+# 无域名也能上 HTTPS：签 Let's Encrypt IP 证书（免费，自动续签，无需 ICP 备案）
+./scripts/https-enable.sh
+# 访问 https://<服务器公网IP>/   （详见 docs/03-启用HTTPS-IP证书.md）
 ```
 
 | 文档 | 内容 |
 |---|---|
 | 📘 **[docs/01-从零部署-上.md](docs/01-从零部署-上.md)** | 阶段 0~5：清空机器 → 系统准备（时区/Swap/Docker）→ 本机打包 → 上传解压 → 包完整性校验 → 生成密钥 → 构建镜像 |
+| 📘 **[docs/02-从零部署-下.md](docs/02-从零部署-下.md)** | 启动验收 + 排错手册 |
+| 🔒 **[docs/03-启用HTTPS-IP证书.md](docs/03-启用HTTPS-IP证书.md)** | 无域名上用 HTTPS：IP 证书签发/续签/回滚、限额依据、浏览器实测清单 |
 | 🐳 `docker-compose.prod.yml` | 生产编排（健康检查、密钥注入、端口收敛、日志轮转） |
-| 🔧 `scripts/deploy.sh` | 一键部署 / 升级 / 健康检查 / 查看日志 |
+| 🔧 `scripts/deploy.sh` | 一键部署 / 升级 / 健康检查 / 查看日志（构建后先用新镜像跑 `nginx -t` 预检，配置写错就中止发布） |
+| 🔐 `scripts/https-enable.sh` | 一键启用 HTTPS：acme.sh 签发 + 安装 + 定时续签 + reload 容器内 Nginx（`--status` / `--renew` / `--disable`） |
 | 💾 `scripts/backup-db.sh` | 数据库备份（可挂 cron，自动清理旧备份） |
 
 ---
@@ -278,6 +285,7 @@ chmod +x scripts/*.sh
 
 | 文档 | 内容 |
 |---|---|
+| 🎓 **[教学文档 · 从零读懂智联生活](docs/教学文档-从零读懂智联生活.md)** | **手把手读代码主线**：7 天计划、三端业务全貌、请求生命周期、三端鉴权与数据隔离（五道防线）、缓存/交易/秒杀/社交逐模块"业务→代码→为什么→练习"、商家端与管理端、速查地图、部署运维、调试排错、改造任务与自测题库 |
 | [从零部署（下）](docs/02-从零部署-下.md) | 阶段 6~10：启动服务 → 三端验收 → 浏览器实测 → 运维命令 → 备份恢复 → 升级回滚 → 排错手册 |
 | [项目学习手册 ① 架构总览与数据模型](docs/项目学习手册/01-架构总览与数据模型.md) | 三端模型、表结构、请求链路 |
 | [项目学习手册 ② 后端基础链路与高并发实现](docs/项目学习手册/02-后端基础链路与高并发实现.md) | 三端鉴权、多级缓存、GEO、签到、UV、匹配 |
