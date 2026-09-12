@@ -2,12 +2,20 @@
 -- 智联生活 · 本地生活与社交聚合平台 · 三端（用户端 / 商家端 / 管理端）数据库初始化脚本
 -- MySQL 8.x  字符集 utf8mb4
 --
+-- ★ 编码关键（勿删下面两行 SET NAMES）★
+--   本文件是 UTF-8 编码。MySQL 客户端连接的默认字符集可能是 latin1（容器内
+--   `--default-character-set` 未生效、或客户端 LANG 影响时都会出现），
+--   那样中文会被"双重编码"写坏：正确的 UTF-8 字节 E5B9B3（平）会被当成 3 个
+--   latin1 字符重新编码成 C3A5C2B9C2B3 存进库，前端最终显示为 å¹³。
+--   在文件开头强制本次会话使用 utf8mb4，使脚本在任何客户端默认字符集下都能
+--   正确导入，不依赖任何启动参数或客户端配置。
+--
 -- 角色模型：role 1=普通用户  2=商家  3=平台管理员
 -- 归属模型：一个商家账号绑定一个店铺（tb_shop.merchant_id 唯一）
 -- 治理模型：商家自主提交入驻资料 -> 平台管理员审核(audit_status) -> 通过后方可经营
 --
 -- 幂等：表使用 CREATE TABLE IF NOT EXISTS，种子使用 INSERT IGNORE（固定主键）
--- 旧库升级：请使用 sql/upgrade_v2_three_end.sql，不要直接重跑本脚本
+-- 旧库升级：请使用 sql/manual/upgrade_v2_three_end.sql，不要直接重跑本脚本
 --
 -- 演示账号（密码为明文，库中存 salt:sha256hex(password+salt)）
 --   平台管理员   13800000000 / admin123
@@ -15,6 +23,10 @@
 --   商家(待审核) 13700000002 / merchant123   （尚未开店，用于演示"提交入驻 → 平台审核 → 自动开店"）
 --   用户         13900000001 / 123456       （13900000002 ~ 13900000009 同密码）
 -- =============================================================================================
+-- 必须先于 CREATE DATABASE 执行：保证连接字符集为 utf8mb4
+SET NAMES utf8mb4;
+SET CHARACTER SET utf8mb4;
+
 CREATE DATABASE IF NOT EXISTS smartlife DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE smartlife;
 

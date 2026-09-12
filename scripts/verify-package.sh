@@ -232,6 +232,19 @@ for pair in "backend:target" "frontend:dist"; do
   fi
 done
 
+# ---- SQL 脚本必须自带 SET NAMES utf8mb4（否则客户端默认 latin1 会把中文写坏）----
+for sqlf in sql/init.sql sql/manual/upgrade_v2_three_end.sql; do
+  [[ -f "$sqlf" ]] || continue
+  if head -40 "$sqlf" | grep -qiE '^[[:space:]]*SET NAMES utf8mb4' ; then
+    ok "${sqlf} 含 SET NAMES utf8mb4（防中文双重编码）"
+  else
+    bad "${sqlf} 缺少 SET NAMES utf8mb4 —— MySQL 客户端默认 latin1 时中文会变成乱码"
+    if [[ $FIX -eq 1 ]]; then
+      sed -i '1i SET NAMES utf8mb4;' "$sqlf" && ok "已在 ${sqlf} 开头插入 SET NAMES utf8mb4"
+    fi
+  fi
+done
+
 # ---- 运行版预编译产物是否随包提供 ----
 if [[ -f backend/Dockerfile.runtime ]]; then
   if [[ -f backend/target/smartlife-backend-1.0.0.jar ]]; then
