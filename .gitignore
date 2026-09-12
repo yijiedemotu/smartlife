@@ -29,3 +29,7 @@ application-local.yml
 
 # 数据库备份
 backup/
+
+# Python 缓存
+__pycache__/
+*.pyc
