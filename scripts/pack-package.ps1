@@ -121,7 +121,8 @@ $mustHave = @(
     'sql/manual/upgrade_v2_three_end.sql',
     'scripts/deploy.sh',
     'scripts/verify-package.sh',
-    'docs/重新部署验证清单.md',
+    'docs/01-从零部署-上.md',
+    'docs/02-从零部署-下.md',
     'backend/src/main/java/com/smartlife/controller/MerchantController.java',
     'frontend/src/views/admin/Applies.vue'
 )

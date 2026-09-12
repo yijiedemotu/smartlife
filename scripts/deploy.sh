@@ -65,7 +65,7 @@ if grep -qE "${PLACEHOLDER_RE}" "${ENV_FILE}"; then
   echo "    sed -i \"s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=\$(openssl rand -base64 24)|\" ${ENV_FILE}"
   echo "    sed -i \"s|^RABBIT_PASSWORD=.*|RABBIT_PASSWORD=\$(openssl rand -base64 24)|\" ${ENV_FILE}"
   echo "    sed -i \"s|^JWT_SECRET=.*|JWT_SECRET=\$(openssl rand -base64 36)|\" ${ENV_FILE}"
-  echo "  改完再执行本脚本即可。详见 docs/重新部署验证清单.md 阶段 3。"
+  echo "  改完再执行本脚本即可。详见 docs/01-从零部署-上.md 阶段 4。"
   exit 1
 fi
 
@@ -73,7 +73,7 @@ fi
 MEM_MB="$(free -m | awk '/^Mem:/{print $7}')"
 log "当前可用内存：${MEM_MB} MB"
 if [[ "${MEM_MB}" -lt 1500 ]]; then
-  err "可用内存不足 1.5G，建议升级到 2C4G 或先增加 Swap（见 docs/部署教程.md FAQ）"
+  err "可用内存不足 1.5G，建议升级到 2C4G 或先增加 Swap（见 docs/02-从零部署-下.md 排错手册）"
   exit 1
 fi
 

@@ -247,7 +247,7 @@ if command -v docker >/dev/null 2>&1; then
   fi
 else
   # 本机/CI 上校验部署包时没有 docker 属正常，不作为「包不完整」的阻断项
-  warn '未检测到 docker：若这是服务器，请先安装 Docker（见 docs/部署教程.md 第 4 步）'
+  warn '未检测到 docker：若这是服务器，请先安装 Docker（见 docs/01-从零部署-上.md 阶段 1）'
   warn '  —— 该提示不影响「部署包完整性」判定'
   DOCKER_OK=0
 fi

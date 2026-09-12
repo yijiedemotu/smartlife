@@ -168,6 +168,31 @@ def main():
         check("deploy.sh 不再使用裸 grep \"CHANGE_ME\"", bare is None,
               bare.group(0) if bare else "")
 
+    print("\n=== 4d. pack-package.ps1 的自检清单必须都真实存在 ===")
+    # 打包脚本末尾会逐个校验 $mustHave 里的文件；若清单里写了不存在的文件，
+    # 下次打包会直接 throw「打包自检失败」，属于会阻断发布的硬错误。
+    pack_path = os.path.join(ROOT, "scripts", "pack-package.ps1")
+    with open(pack_path, "r", encoding="utf-8-sig") as fh:
+        pack_text = fh.read()
+    block = _re.search(r"\$mustHave\s*=\s*@\((.*?)\)", pack_text, _re.S)
+    check("pack-package.ps1 中定义了 $mustHave 清单", bool(block), "未找到 $mustHave 数组")
+    if block:
+        listed = _re.findall(r"'([^']+)'", block.group(1))
+        check("$mustHave 清单非空", len(listed) > 0, listed)
+        missing = []
+        for item in listed:
+            if not os.path.exists(os.path.join(ROOT, item.replace("/", os.sep))):
+                missing.append(item)
+        check("$mustHave 中列出的文件全部存在", not missing, missing)
+
+    print("\n=== 4e. 部署文档存在且被 README 引用 ===")
+    for rel in ("docs/01-从零部署-上.md", "docs/02-从零部署-下.md"):
+        check(f"{rel} 存在", os.path.exists(os.path.join(ROOT, rel)))
+    with open(os.path.join(ROOT, "README.md"), "r", encoding="utf-8") as fh:
+        readme = fh.read()
+    for name in ("01-从零部署-上.md", "02-从零部署-下.md"):
+        check(f"README 引用了 {name}", name in readme)
+
     print("\n=== 5. 演示账号口径一致（四个账号都应被文档提到）===")
     for acc in ("13800000000", "13700000001", "13700000002", "13900000001"):
         check(f"演示账号 {acc} 在文档中", acc in joined)

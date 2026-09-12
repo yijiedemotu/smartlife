@@ -234,7 +234,7 @@ mysql -uroot -p smartlife < sql/manual/upgrade_v2_three_end.sql
 **整机全容器化，一条命令拉起全站**（MySQL + Redis + RabbitMQ + 后端 + Nginx 前端），仅对外暴露 80 端口：
 
 ```bash
-# 服务器上执行（详见 docs/部署教程.md）
+# 服务器上执行（详见 docs/01-从零部署-上.md 与 02-从零部署-下.md）
 cd /opt/smartlife
 cp .env.prod.example .env.prod && vim .env.prod    # 改密码/密钥
 chmod +x scripts/*.sh
@@ -244,7 +244,7 @@ chmod +x scripts/*.sh
 
 | 文档 | 内容 |
 |---|---|
-| 📘 **[docs/部署教程.md](docs/部署教程.md)** | 从零开始：阿里云安全组 → Swap → Docker 安装 → 代码上传 → 密钥配置 → 一键部署 → 验收清单 → 运维手册 → 备份恢复 → 升级回滚 → 安全加固 → 域名 HTTPS → 调优 → 排查 FAQ |
+| 📘 **[docs/01-从零部署-上.md](docs/01-从零部署-上.md)** | 阶段 0~5：清空机器 → 系统准备（时区/Swap/Docker）→ 本机打包 → 上传解压 → 包完整性校验 → 生成密钥 → 构建镜像 |
 | 🐳 `docker-compose.prod.yml` | 生产编排（健康检查、密钥注入、端口收敛、日志轮转） |
 | 🔧 `scripts/deploy.sh` | 一键部署 / 升级 / 健康检查 / 查看日志 |
 | 💾 `scripts/backup-db.sh` | 数据库备份（可挂 cron，自动清理旧备份） |
@@ -278,7 +278,7 @@ chmod +x scripts/*.sh
 
 | 文档 | 内容 |
 |---|---|
-| [部署教程（阿里云 Ubuntu22 + Docker）](docs/部署教程.md) | 生产部署全流程 |
+| [从零部署（下）](docs/02-从零部署-下.md) | 阶段 6~10：启动服务 → 三端验收 → 浏览器实测 → 运维命令 → 备份恢复 → 升级回滚 → 排错手册 |
 | [项目学习手册 ① 架构总览与数据模型](docs/项目学习手册/01-架构总览与数据模型.md) | 三端模型、表结构、请求链路 |
 | [项目学习手册 ② 后端基础链路与高并发实现](docs/项目学习手册/02-后端基础链路与高并发实现.md) | 三端鉴权、多级缓存、GEO、签到、UV、匹配 |
 | [项目学习手册 ③ 交易链路](docs/项目学习手册/03-交易链路.md) | 秒杀(Lua+MQ)、订单履约、多端 WebSocket、私信 |
