@@ -1,0 +1,36 @@
+# =============================================================================
+# 智联生活前端镜像（运行版 · 不含编译）
+#
+# 适用场景：服务器无法拉取 node 构建镜像时，
+#          直接使用本地已构建好的 dist 打包静态站点镜像。
+#
+# 前置：先在本机执行 `npm run build`，确保 frontend/dist/ 存在。
+#
+# 构建（在仓库根目录执行）：
+#   docker build -f frontend/Dockerfile.runtime -t smartlife-frontend:2.0.0 ./frontend
+#
+# 对比：frontend/Dockerfile 是「多阶段构建版」（容器内 npm build），
+#      需要能拉到 node:20-alpine 镜像时使用。
+# =============================================================================
+# 基础镜像可被 compose 的 build.args 覆盖（换镜像源时只改 .env.prod）
+ARG NGINX_IMAGE=nginx:alpine
+FROM ${NGINX_IMAGE}
+
+LABEL maintainer="smartlife" \
+      description="智联生活三端平台前端（运行版，dist 预构建）"
+
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime 2>/dev/null || true
+
+# 站点配置：history 路由回退 + /api 反向代理 + WebSocket 升级
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# 只拷贝构建产物：不做 npm install，构建通常 1~2 秒
+COPY dist /usr/share/nginx/html
+
+EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD wget -q -O /dev/null http://127.0.0.1/ || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]

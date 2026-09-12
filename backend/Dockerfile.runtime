@@ -1,0 +1,47 @@
+# =============================================================================
+# 智联生活后端镜像（运行版 · 不含编译）
+#
+# 适用场景：服务器无法拉取 maven/node 等构建镜像时，
+#          直接使用本地已编译好的 jar 打包运行镜像。
+#
+# 前置：先在本机执行 `mvn clean package -DskipTests`，确保
+#      backend/target/smartlife-backend-1.0.0.jar 存在。
+#
+# 构建（在仓库根目录执行）：
+#   docker build -f backend/Dockerfile.runtime -t smartlife-backend:2.0.0 ./backend
+#
+# 对比：backend/Dockerfile 是「多阶段构建版」（容器内 Maven 编译），
+#      需要能拉到 maven:3.9-eclipse-temurin-17 镜像时使用。
+# =============================================================================
+# 基础镜像可被 compose 的 build.args 覆盖（换镜像源时只改 .env.prod）
+ARG JRE_IMAGE=openjdk:17-jdk-slim
+FROM ${JRE_IMAGE}
+
+LABEL maintainer="smartlife" \
+      description="智联生活三端平台后端（运行版，jar 预编译）"
+
+ENV TZ=Asia/Shanghai \
+    LANG=C.UTF-8 \
+    JAVA_OPTS="-Xms384m -Xmx768m -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai"
+
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime 2>/dev/null || true
+
+WORKDIR /app
+
+# 只拷贝编译产物：不装 Maven、不联网拉依赖，构建通常 1~2 秒
+COPY target/smartlife-backend-1.0.0.jar /app/app.jar
+
+# 以非 root 用户运行（openjdk 镜像已内置非 root 用户，这里自建一个更直观）
+RUN groupadd -r smartlife 2>/dev/null || true \
+    && useradd -r -g smartlife smartlife 2>/dev/null || true \
+    && mkdir -p /app/logs \
+    && chown -R smartlife:smartlife /app
+USER smartlife
+
+EXPOSE 8080
+
+# 存活探针：探测 TCP 端口（镜像内无 curl，避免额外安装）
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=5 \
+    CMD ["sh", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]

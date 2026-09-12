@@ -19,7 +19,12 @@ except ImportError:
     sys.exit(2)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FILES = ["docker-compose.yml", "docker-compose.full.yml", "docker-compose.prod.yml"]
+FILES = [
+    "docker-compose.yml",
+    "docker-compose.full.yml",
+    "docker-compose.prod.yml",
+    "docker-compose.runtime.yml",
+]
 
 failures = []
 checks = 0
@@ -159,6 +164,33 @@ def main():
     check("前端镜像多阶段构建（node + nginx）", "node:20-alpine" in fe and "nginx:1.25-alpine" in fe)
     check("前端镜像拷贝了自己的 nginx.conf", "COPY nginx.conf" in fe)
 
+    # 运行版 Dockerfile（不联网构建：只拷预编译产物），供拉不到 maven/node 镜像的服务器使用
+    be_rt = os.path.join(ROOT, "backend", "Dockerfile.runtime")
+    fe_rt = os.path.join(ROOT, "frontend", "Dockerfile.runtime")
+    check("backend/Dockerfile.runtime 存在", os.path.exists(be_rt))
+    check("frontend/Dockerfile.runtime 存在", os.path.exists(fe_rt))
+    if os.path.exists(be_rt):
+        with open(be_rt, "r", encoding="utf-8") as fh:
+            t = fh.read()
+        # 只看 RUN 指令里是否真的执行了构建命令（避免误匹配注释里的 "Maven" 字样）
+        run_lines = [ln.strip() for ln in t.splitlines()
+                     if ln.strip().upper().startswith("RUN ")]
+        has_build_cmd = any(re.search(r"\bmvn\b|\bmaven\b", ln) for ln in run_lines)
+        check("后端运行版只 COPY jar（不在构建阶段跑 Maven）",
+              "COPY target/smartlife-backend-1.0.0.jar" in t and not has_build_cmd,
+              f"RUN 行：{run_lines}")
+        check("后端运行版基础镜像可被 ARG 覆盖", "ARG JRE_IMAGE" in t)
+    if os.path.exists(fe_rt):
+        with open(fe_rt, "r", encoding="utf-8") as fh:
+            t = fh.read()
+        run_lines = [ln.strip() for ln in t.splitlines()
+                     if ln.strip().upper().startswith("RUN ")]
+        has_build_cmd = any(re.search(r"\bnpm\b|\bnode\b", ln) for ln in run_lines)
+        check("前端运行版只 COPY dist（不在构建阶段跑 npm）",
+              "COPY dist" in t and not has_build_cmd,
+              f"RUN 行：{run_lines}")
+        check("前端运行版基础镜像可被 ARG 覆盖", "ARG NGINX_IMAGE" in t)
+
     print("\n=== 7. Dockerfile 的 COPY 源必须真的在构建上下文里 ===")
     # 这一类问题的典型症状：构建时报
     #   failed to calculate checksum of ref ...: "/xxx": not found
@@ -167,12 +199,20 @@ def main():
     # 判定方法：真正模拟 Docker 的行为 —— 先把上下文里所有文件列出来，减去
     # .dockerignore 命中的部分，再看 Dockerfile 的每个 COPY 源是否还能匹配到至少一个文件。
     # 这样无论是 `COPY settings.xml` 还是 `COPY settings.xm[l]` 都能正确判定。
+    #
+    # 预编译产物（target/*.jar、dist/**）在开发机上可能不存在，这里单独标注为"待构建产物"，
+    # 不计为失败——因为 Dockerfile.runtime 的前提就是用本机构建好的产物。
     import fnmatch
     import glob
 
-    for ctx in ("backend", "frontend"):
+    PREBUILT_PREFIXES = ("target/", "dist/")
+    for ctx, df_rel in (("backend", "Dockerfile"), ("backend", "Dockerfile.runtime"),
+                        ("frontend", "Dockerfile"), ("frontend", "Dockerfile.runtime")):
+        label = f"{ctx}/{df_rel}"
         ctx_root = os.path.join(ROOT, ctx)
-        df_path = os.path.join(ctx_root, "Dockerfile")
+        df_path = os.path.join(ctx_root, df_rel)
+        if not os.path.exists(df_path):
+            continue
         with open(df_path, "r", encoding="utf-8") as fh:
             dockerfile = fh.read()
 
@@ -205,7 +245,7 @@ def main():
                 if not excluded(rel):
                     effective.append(rel)
 
-        check(f"{ctx}: 构建上下文非空（.dockerignore 没把整个目录排掉）",
+        check(f"{label}: 构建上下文非空（.dockerignore 没把整个目录排掉）",
               bool(effective), f"剩余 {len(effective)} 个文件")
 
         for line in dockerfile.splitlines():
@@ -221,10 +261,16 @@ def main():
 
             # `COPY . .`（拷贝整个上下文）不适用单文件判定，只要上下文非空即可
             if src in (".", "./", "*"):
-                check(f"{ctx}: COPY 源 {src} 可用（拷贝整个上下文）", bool(effective))
+                check(f"{label}: COPY 源 {src} 可用（拷贝整个上下文）", bool(effective))
                 continue
 
             exact = glob.glob(os.path.join(ctx_root, src))
+            if not exact and src.startswith(PREBUILT_PREFIXES):
+                # 预编译产物（jar / dist）属于"本机构建后才存在"的文件，
+                # 开发机上没有是正常的，不判失败，但明确提示。
+                check(f"{label}: COPY 源 {src} 为预编译产物（需先在本机构建）", True)
+                print(f"         ⚠ 当前磁盘上不存在：{src}（构建镜像前必须先 mvn package / npm run build）")
+                continue
             if exact:
                 # 源路径在磁盘上存在，检查是否被 .dockerignore 吃掉
                 alive = []
@@ -234,7 +280,7 @@ def main():
                         alive += [f for f in effective if f.startswith(rel + "/")]
                     elif rel in effective:
                         alive.append(rel)
-                check(f"{ctx}: COPY 源 {src} 未被 .dockerignore 排除",
+                check(f"{label}: COPY 源 {src} 未被 .dockerignore 排除",
                       bool(alive), f"命中 {len(exact)} 个路径但都被 .dockerignore 排除了")
                 continue
 
@@ -243,7 +289,7 @@ def main():
             if fallback:
                 check(f"{ctx}: COPY 源 {src} 为可选文件写法且磁盘上确实存在", True)
             else:
-                check(f"{ctx}: COPY 源 {src} 在构建上下文中可用", False,
+                check(f"{label}: COPY 源 {src} 在构建上下文中可用", False,
                       "文件不存在（也不是通配写法）")
 
     print("\n=== 8. 可选文件的 COPY 必须有运行时兜底 ===")

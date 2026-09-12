@@ -1,0 +1,203 @@
+# =============================================================================
+# 智联生活 · 生产编排（适配「服务器已有镜像」的版本）
+#
+# 与 docker-compose.prod.yml 的区别：
+#   1) 基础镜像全部使用服务器本地已有的 tag，**构建与启动全程不需要联网拉镜像**
+#      mysql:8.0 / redis:alpine / rabbitmq:3-alpine / openjdk:17-jdk-slim / nginx:alpine
+#   2) 后端与前端使用 Dockerfile.runtime —— 只拷贝本机预编译好的产物
+#      （backend/target/*.jar 与 frontend/dist），不在服务器上跑 Maven / npm
+#      原因：服务器拉不到 maven / node 镜像
+#
+# 启动：
+#   docker compose --env-file .env.prod -f docker-compose.runtime.yml up -d --build
+# =============================================================================
+
+name: smartlife
+
+services:
+  # ---------------------------------------------------------------------------
+  # MySQL 8：业务数据库；首次启动（数据卷为空）自动执行 sql/init.sql 建表 + 三端种子
+  # ---------------------------------------------------------------------------
+  mysql:
+    image: mysql:8.0
+    container_name: smartlife-mysql
+    restart: always
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+      - --max_connections=300
+      # 内存 1.7G 的机器：缓冲池压到 256M，避免和 JVM/中间件抢内存
+      - --innodb-buffer-pool-size=256M
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env.prod 中设置 MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-smartlife}
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./backup:/backup
+    ports:
+      - "127.0.0.1:3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    networks:
+      - smartlife-net
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  # ---------------------------------------------------------------------------
+  # Redis：多级缓存 / GEO 附近 / 秒杀 Lua / BitMap 签到 / HyperLogLog UV
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:alpine
+    container_name: smartlife-redis
+    restart: always
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - ${REDIS_PASSWORD:?请在 .env.prod 中设置 REDIS_PASSWORD}
+      - --maxmemory
+      - 256mb
+      # noeviction：缓存被淘汰会破坏秒杀库存的正确性，宁可写入报错
+      - --maxmemory-policy
+      - noeviction
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - redis-data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - smartlife-net
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # ---------------------------------------------------------------------------
+  # RabbitMQ：秒杀异步下单削峰 + 死信队列兜底
+  # ---------------------------------------------------------------------------
+  rabbitmq:
+    image: rabbitmq:3-alpine
+    container_name: smartlife-rabbitmq
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBIT_USER:?请在 .env.prod 中设置 RABBIT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBIT_PASSWORD:?请在 .env.prod 中设置 RABBIT_PASSWORD}
+      TZ: Asia/Shanghai
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    ports:
+      - "127.0.0.1:5672:5672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - smartlife-net
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # ---------------------------------------------------------------------------
+  # 后端：openjdk:17-jdk-slim + 预编译 jar（不做 Maven 构建）
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.runtime
+      args:
+        JRE_IMAGE: ${JRE_IMAGE:-openjdk:17-jdk-slim}
+    image: smartlife-backend:${APP_VERSION:-2.0.0}
+    container_name: smartlife-backend
+    restart: always
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      RABBIT_HOST: rabbitmq
+      RABBIT_PORT: "5672"
+      RABBIT_USER: ${RABBIT_USER}
+      RABBIT_PASSWORD: ${RABBIT_PASSWORD}
+      SMARTLIFE_JWT_SECRET: ${JWT_SECRET:?请在 .env.prod 中设置 JWT_SECRET}
+      SPRING_PROFILES_ACTIVE: prod
+      SECKILL_LUA_ENABLED: ${SECKILL_LUA_ENABLED:-true}
+      # 内存 1.7G 的机器：堆压到 768M，给 MySQL/Redis/RabbitMQ 留余量
+      JAVA_OPTS: ${BACKEND_JAVA_OPTS:--Xms384m -Xmx768m -XX:+UseG1GC -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai}
+    volumes:
+      - backend-logs:/app/logs
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks:
+      - smartlife-net
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  # ---------------------------------------------------------------------------
+  # 前端：nginx:alpine + 预构建 dist（不做 npm build）
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.runtime
+      args:
+        NGINX_IMAGE: ${NGINX_IMAGE:-nginx:alpine}
+    image: smartlife-frontend:${APP_VERSION:-2.0.0}
+    container_name: smartlife-frontend
+    restart: always
+    depends_on:
+      - backend
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - smartlife-net
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  mysql-data:
+    name: smartlife-mysql-data
+  redis-data:
+    name: smartlife-redis-data
+  rabbitmq-data:
+    name: smartlife-rabbitmq-data
+  backend-logs:
+    name: smartlife-backend-logs
+
+networks:
+  smartlife-net:
+    name: smartlife-net
+    driver: bridge

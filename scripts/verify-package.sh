@@ -33,24 +33,37 @@ echo "==================================================================="
 # ------------------------------------------------------------------ 1. 关键文件
 echo
 echo "=== 1. 关键文件清单 ==="
-REQUIRED=(
-  docker-compose.prod.yml
-  docker-compose.yml
+# CORE：无论哪种包形态（完整源码包 / 运行版最小包）都必须存在
+CORE=(
   .env.prod.example
-  .gitattributes
-  backend/Dockerfile
-  backend/pom.xml
-  backend/settings.xml
   backend/.dockerignore
-  frontend/Dockerfile
   frontend/nginx.conf
-  frontend/package.json
   sql/init.sql
-  sql/README.md
-  sql/manual/upgrade_v2_three_end.sql
   scripts/deploy.sh
   scripts/backup-db.sh
   scripts/restore-db.sh
+)
+# 至少要有一种编排文件 + 对应的 Dockerfile
+if [[ -f docker-compose.runtime.yml ]]; then
+  CORE+=(docker-compose.runtime.yml backend/Dockerfile.runtime frontend/Dockerfile.runtime)
+else
+  CORE+=(docker-compose.prod.yml backend/Dockerfile frontend/Dockerfile)
+fi
+
+# OPTIONAL：完整源码包才有；存在就一并校验，不存在不判失败（运行版包不含源码）
+OPTIONAL=(
+  docker-compose.prod.yml
+  docker-compose.yml
+  .gitattributes
+  backend/Dockerfile
+  backend/Dockerfile.runtime
+  backend/pom.xml
+  backend/settings.xml
+  frontend/Dockerfile
+  frontend/Dockerfile.runtime
+  frontend/package.json
+  sql/README.md
+  sql/manual/upgrade_v2_three_end.sql
   backend/src/main/java/com/smartlife/SmartLifeApplication.java
   backend/src/main/java/com/smartlife/common/RoleConstants.java
   backend/src/main/java/com/smartlife/security/RoleGuard.java
@@ -60,8 +73,10 @@ REQUIRED=(
   frontend/src/views/merchant/Dashboard.vue
   frontend/src/views/admin/Applies.vue
 )
+
 MISSING=0
-for f in "${REQUIRED[@]}"; do
+echo "  --- 核心文件（必须有）---"
+for f in "${CORE[@]}"; do
   if [[ -f "$f" ]]; then
     printf '  [ OK ] %-58s %s\n' "$f" "$(du -h "$f" | cut -f1)"
   else
@@ -69,24 +84,55 @@ for f in "${REQUIRED[@]}"; do
     MISSING=$((MISSING+1))
   fi
 done
+
+PRESENT=0
+OPT_MISSING=""
+for f in "${OPTIONAL[@]}"; do
+  [[ -f "$f" ]] && PRESENT=$((PRESENT+1)) || OPT_MISSING="$OPT_MISSING $f"
+done
+echo "  --- 源码类文件（${PRESENT} 个存在，存在即校验）---"
+for f in "${OPTIONAL[@]}"; do
+  [[ -f "$f" ]] && printf '  [ OK ] %-58s %s\n' "$f" "$(du -h "$f" | cut -f1)"
+done
+
 if [[ $MISSING -eq 0 ]]; then
-  ok "关键文件全部存在（${#REQUIRED[@]} 项）"
+  ok "核心文件全部存在（${#CORE[@]} 项）"
+  # 判断包形态，便于后续分支逻辑
+  if [[ -f backend/pom.xml && -f frontend/package.json ]]; then
+    PACKAGE_KIND="full"
+    ok "识别为【完整源码包】（含 pom.xml 与 package.json，可在服务器内构建）"
+  else
+    PACKAGE_KIND="runtime"
+    ok "识别为【运行版最小包】（不含源码，依赖预编译产物 + 服务器已有镜像）"
+  fi
 else
-  bad "缺失 ${MISSING} 个关键文件，压缩包不完整"
+  bad "缺失 ${MISSING} 个核心文件，压缩包不完整"
 fi
 
 # 不应出现的目录（打包时误带会把构建拖慢甚至失败）
 echo
-echo "=== 2. 不应出现的产物/目录 ==="
-for d in node_modules target dist .git .idea; do
-  if [[ -e "$d" ]]; then
-    warn "存在 ${d}/（打包时应排除，会让构建变慢）"
-  else
-    ok "无 ${d}/"
-  fi
+echo "=== 2. 产物目录检查（按包形态区分）==="
+PKG_KIND="${PACKAGE_KIND:-runtime}"
+for d in node_modules .git .idea; do
+  if [[ -e "$d" ]]; then warn "存在 ${d}/（打包时应排除，会让构建变慢）"; else ok "无 ${d}/"; fi
 done
-if [[ -d backend/target ]]; then warn "存在 backend/target/（应排除）"; fi
 if [[ -d frontend/node_modules ]]; then warn "存在 frontend/node_modules/（应排除）"; fi
+
+if [[ "$PKG_KIND" == "runtime" ]]; then
+  # 运行版最小包：target/ 与 dist/ 是刻意提供的（各只含预编译产物）
+  if [[ -f backend/target/smartlife-backend-1.0.0.jar ]]; then
+    target_files=$(find backend/target -type f | wc -l)
+    ok "backend/target/ 为刻意提供（${target_files} 个文件，应只有 jar）"
+    [[ "$target_files" -gt 2 ]] && warn "backend/target/ 文件偏多（${target_files} 个），建议只保留 jar"
+  fi
+  if [[ -f frontend/dist/index.html ]]; then
+    ok "frontend/dist/ 为刻意提供（$(find frontend/dist -type f | wc -l) 个文件）"
+  fi
+else
+  for d in target dist; do
+    if [[ -e "$d" ]]; then warn "存在 ${d}/（完整源码包应排除，会让构建变慢）"; else ok "无 ${d}/"; fi
+  done
+fi
 
 # ------------------------------------------------------------------ 3. 换行格式
 echo
@@ -168,6 +214,37 @@ else
       '    </mirror>' \
       '  </mirrors>' \
       '</settings>' > backend/settings.xml && ok "已生成 backend/settings.xml"
+  fi
+fi
+
+# ---- 运行版（Dockerfile.runtime）的前提：target/ 与 dist/ 不能被 .dockerignore 排除 ----
+# backend/.dockerignore 若含 target，Dockerfile.runtime 的 COPY target/*.jar 必然失败（真实踩过的坑）
+for pair in "backend:target" "frontend:dist"; do
+  d="${pair%%:*}"; pat="${pair##*:}"
+  di="${d}/.dockerignore"
+  if [[ -f "$di" ]] && grep -qE "^[[:space:]]*${pat}[[:space:]]*$" "$di"; then
+    bad "${di} 排除了 ${pat}/，Dockerfile.runtime 的 COPY ${pat} 会失败"
+    if [[ $FIX -eq 1 ]]; then
+      sed -i "/^[[:space:]]*${pat}[[:space:]]*$/d" "$di" && ok "已从 ${di} 移除 ${pat}"
+    fi
+  else
+    ok "${di} 未排除 ${pat}/（运行版可构建）"
+  fi
+done
+
+# ---- 运行版预编译产物是否随包提供 ----
+if [[ -f backend/Dockerfile.runtime ]]; then
+  if [[ -f backend/target/smartlife-backend-1.0.0.jar ]]; then
+    ok "jar 已随包提供：backend/target/smartlife-backend-1.0.0.jar ($(du -h backend/target/smartlife-backend-1.0.0.jar | cut -f1))"
+  else
+    warn "jar 不在包内（backend/target/smartlife-backend-1.0.0.jar）—— 运行版后端镜像会构建失败"
+  fi
+fi
+if [[ -f frontend/Dockerfile.runtime ]]; then
+  if [[ -f frontend/dist/index.html ]]; then
+    ok "dist 已随包提供：frontend/dist/（$(find frontend/dist -type f | wc -l) 个文件）"
+  else
+    warn "dist 不在包内（frontend/dist/）—— 运行版前端镜像会构建失败"
   fi
 fi
 
