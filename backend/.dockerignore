@@ -2,4 +2,3 @@ target
 *.log
 .idea
 .git
-settings.xml

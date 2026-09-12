@@ -159,6 +159,104 @@ def main():
     check("前端镜像多阶段构建（node + nginx）", "node:20-alpine" in fe and "nginx:1.25-alpine" in fe)
     check("前端镜像拷贝了自己的 nginx.conf", "COPY nginx.conf" in fe)
 
+    print("\n=== 7. Dockerfile 的 COPY 源必须真的在构建上下文里 ===")
+    # 这一类问题的典型症状：构建时报
+    #   failed to calculate checksum of ref ...: "/xxx": not found
+    # 根因是 .dockerignore 排除了某个被 COPY 的文件（本仓库真实踩过一次坑）。
+    #
+    # 判定方法：真正模拟 Docker 的行为 —— 先把上下文里所有文件列出来，减去
+    # .dockerignore 命中的部分，再看 Dockerfile 的每个 COPY 源是否还能匹配到至少一个文件。
+    # 这样无论是 `COPY settings.xml` 还是 `COPY settings.xm[l]` 都能正确判定。
+    import fnmatch
+    import glob
+
+    for ctx in ("backend", "frontend"):
+        ctx_root = os.path.join(ROOT, ctx)
+        df_path = os.path.join(ctx_root, "Dockerfile")
+        with open(df_path, "r", encoding="utf-8") as fh:
+            dockerfile = fh.read()
+
+        patterns = []
+        di_path = os.path.join(ctx_root, ".dockerignore")
+        if os.path.exists(di_path):
+            with open(di_path, "r", encoding="utf-8") as fh:
+                patterns = [ln.strip() for ln in fh
+                            if ln.strip() and not ln.strip().startswith("#")]
+
+        def excluded(rel_path):
+            for pat in patterns:
+                pure = pat.rstrip("/")
+                if fnmatch.fnmatch(rel_path, pure) or fnmatch.fnmatch(rel_path, pure + "/*"):
+                    return True
+                if fnmatch.fnmatch(os.path.basename(rel_path), pure):
+                    return True
+            return False
+
+        # 构建上下文的实际内容（应用 .dockerignore 之后）
+        effective = []
+        for dirpath, dirnames, filenames in os.walk(ctx_root):
+            rel_dir = os.path.relpath(dirpath, ctx_root).replace("\\", "/")
+            rel_dir = "" if rel_dir == "." else rel_dir
+            # 目录整体被排除时连同子树一起剪掉
+            dirnames[:] = [d for d in dirnames
+                           if not excluded(f"{rel_dir}/{d}".lstrip("/"))]
+            for fn in filenames:
+                rel = f"{rel_dir}/{fn}".lstrip("/")
+                if not excluded(rel):
+                    effective.append(rel)
+
+        check(f"{ctx}: 构建上下文非空（.dockerignore 没把整个目录排掉）",
+              bool(effective), f"剩余 {len(effective)} 个文件")
+
+        for line in dockerfile.splitlines():
+            line = line.strip()
+            if not line.upper().startswith("COPY "):
+                continue
+            if "--from=" in line:
+                continue
+            parts = line[5:].split()
+            if len(parts) < 2:
+                continue
+            src = parts[0]
+
+            # `COPY . .`（拷贝整个上下文）不适用单文件判定，只要上下文非空即可
+            if src in (".", "./", "*"):
+                check(f"{ctx}: COPY 源 {src} 可用（拷贝整个上下文）", bool(effective))
+                continue
+
+            exact = glob.glob(os.path.join(ctx_root, src))
+            if exact:
+                # 源路径在磁盘上存在，检查是否被 .dockerignore 吃掉
+                alive = []
+                for p in exact:
+                    rel = os.path.relpath(p, ctx_root).replace("\\", "/")
+                    if os.path.isdir(p):
+                        alive += [f for f in effective if f.startswith(rel + "/")]
+                    elif rel in effective:
+                        alive.append(rel)
+                check(f"{ctx}: COPY 源 {src} 未被 .dockerignore 排除",
+                      bool(alive), f"命中 {len(exact)} 个路径但都被 .dockerignore 排除了")
+                continue
+
+            # 磁盘上没有精确命中：可能是合法的"可选文件"写法（如 settings.xm[l]）
+            fallback = glob.glob(os.path.join(ctx_root, src.replace("[", "").replace("]", "")))
+            if fallback:
+                check(f"{ctx}: COPY 源 {src} 为可选文件写法且磁盘上确实存在", True)
+            else:
+                check(f"{ctx}: COPY 源 {src} 在构建上下文中可用", False,
+                      "文件不存在（也不是通配写法）")
+
+    print("\n=== 8. 可选文件的 COPY 必须有运行时兜底 ===")
+    # `COPY xxx[l] ...` 这类写法在源缺失时不会让构建失败，
+    # 但必须配合 RUN 兜底，否则后续步骤会用到不存在的文件。
+    with open(os.path.join(ROOT, "backend", "Dockerfile"), "r", encoding="utf-8") as fh:
+        be_text = fh.read()
+    has_optional_copy = "settings.xm[l]" in be_text or "xm[l]" in be_text
+    check("backend/settings.xml 采用可选 COPY 写法", has_optional_copy)
+    if has_optional_copy:
+        check("可选 copy 有 RUN 兜底（缺失时自动生成阿里云 Maven 配置）",
+              "[ ! -s /root/.m2/settings.xml ]" in be_text and "aliyun" in be_text)
+
     print("\n============================ SUMMARY ============================")
     if failures:
         print(f"  通过 {checks - len(failures)} / {checks}，失败 {len(failures)}：{failures}")

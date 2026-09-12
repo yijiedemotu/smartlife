@@ -12,8 +12,30 @@ FROM maven:3.9-eclipse-temurin-17 AS build
 WORKDIR /build
 
 # 依赖与源码分离拷贝：pom 未变时可复用依赖层缓存，重复构建更快
-COPY settings.xml /root/.m2/settings.xml
-COPY pom.xml .
+# 这里刻意把它放在 /root/.m2/settings.xml 的位置：万一下面可选的 settings.xml
+# 不存在，它还能充当"占位文件"让兜底逻辑只需判断文件是否为空。
+COPY pom.xml /root/.m2/settings.xml
+
+# Maven 镜像配置（阿里云）：优先使用构建上下文里的 settings.xml（存在即覆盖占位文件）；
+# 若该文件缺失（例如 clone 到的是较早的提交），则自动生成一份兜底配置。
+# 注意：COPY 的源用通配符 settings.xm[l]，这样"源文件不存在"时不会让构建失败。
+COPY settings.xm[l] /root/.m2/settings.xml
+RUN if [ ! -s /root/.m2/settings.xml ]; then \
+        printf '%s\n' \
+          '<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">' \
+          '  <mirrors>' \
+          '    <mirror>' \
+          '      <id>aliyun-central</id>' \
+          '      <url>https://maven.aliyun.com/repository/public</url>' \
+          '      <mirrorOf>central</mirrorOf>' \
+          '    </mirror>' \
+          '  </mirrors>' \
+          '</settings>' > /root/.m2/settings.xml; \
+        echo '[smartlife] settings.xml 缺失，已生成阿里云 Maven 兜底配置'; \
+    else \
+        echo '[smartlife] 使用仓库自带的 settings.xml'; \
+    fi
+
 RUN mvn -B -q dependency:go-offline -DskipTests || true
 
 COPY src ./src
